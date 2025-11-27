@@ -4,6 +4,15 @@ BitVault BTC Risk Dashboard
 Run with: streamlit run src/dashboard/app.py
 """
 
+import os
+import sys
+import sqlite3
+
+# Add project root to path for cloud deployment
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -20,6 +29,7 @@ from src.risk.ltv import (
 )
 from src.data.prices import PriceFetcher
 from src.data.refresh import get_last_update_times, get_data_freshness, refresh_all_data
+from src.data.database import init_database, get_db_path
 from src.regime.classifier import RegimeClassifier, RegimeClassification
 from src.validation import (
     PortfolioValidator, 
@@ -30,6 +40,81 @@ from src.validation import (
 from src.logging_config import get_logger
 
 logger = get_logger("dashboard")
+
+
+# ============================================================================
+# CLOUD DEPLOYMENT: Data Initialization
+# ============================================================================
+# On Streamlit Cloud, the filesystem resets on each deploy. This function
+# ensures we have data available by fetching it on startup if needed.
+
+@st.cache_resource(show_spinner=False)
+def initialize_cloud_data():
+    """
+    Initialize database and fetch data if running in cloud environment.
+    This runs once per app instance and is cached.
+    """
+    try:
+        # Initialize database schema
+        init_database()
+        
+        # Check if we have sufficient data
+        db_path = get_db_path()
+        conn = sqlite3.connect(db_path)
+        
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM btc_prices").fetchone()[0]
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet
+            count = 0
+        finally:
+            conn.close()
+        
+        # If we have less than 100 rows, backfill data
+        if count < 100:
+            logger.info(f"Database has {count} rows, backfilling data...")
+            
+            # Show a message to the user
+            with st.spinner("Initializing data (first run only, ~30 seconds)..."):
+                # Backfill 3 years of price data
+                from src.data.prices import PriceFetcher
+                from src.data.macro import MacroFetcher
+                from datetime import datetime, timedelta
+                
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                start_date = (datetime.now() - timedelta(days=3*365)).strftime('%Y-%m-%d')
+                
+                # Fetch BTC prices
+                try:
+                    price_fetcher = PriceFetcher(use_cryptoquant=False)
+                    df = price_fetcher.fetch_prices(start_date, end_date)
+                    price_fetcher.save_to_db(df)
+                    logger.info(f"Backfilled {len(df)} BTC price rows")
+                except Exception as e:
+                    logger.error(f"Failed to backfill prices: {e}")
+                
+                # Fetch macro data
+                try:
+                    macro_fetcher = MacroFetcher()
+                    df = macro_fetcher.fetch_all(start_date, end_date)
+                    if not df.empty:
+                        macro_fetcher.save_to_db(df)
+                        logger.info(f"Backfilled macro data")
+                except Exception as e:
+                    logger.error(f"Failed to backfill macro: {e}")
+            
+            return "initialized"
+        else:
+            logger.info(f"Database has {count} rows, no backfill needed")
+            return "ready"
+            
+    except Exception as e:
+        logger.error(f"Cloud initialization failed: {e}")
+        return f"error: {e}"
+
+
+# Run initialization on app start
+_init_status = initialize_cloud_data()
 
 
 # Page config

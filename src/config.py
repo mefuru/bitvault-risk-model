@@ -1,10 +1,15 @@
 """
 Configuration loading utilities.
+
+Supports:
+- Local .env file
+- config.yaml
+- Streamlit Cloud secrets (for cloud deployment)
 """
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 from dotenv import load_dotenv
@@ -16,36 +21,64 @@ def get_project_root() -> Path:
     return Path(__file__).parent.parent
 
 
+def _get_streamlit_secret(key: str) -> Optional[str]:
+    """
+    Try to get a secret from Streamlit Cloud.
+    Returns None if not running in Streamlit or secret not found.
+    """
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return None
+
+
 def load_config() -> dict[str, Any]:
     """
     Load configuration from config.yaml and environment variables.
     
-    Environment variables take precedence over config file values for secrets.
+    Priority (highest to lowest):
+    1. Streamlit Cloud secrets
+    2. Environment variables
+    3. config.yaml values
     """
-    project_root = get_project_root()
-    
     # Load .env file if it exists
-    env_path = project_root / ".env"
+    env_path = get_project_root() / ".env"
     if env_path.exists():
         load_dotenv(env_path)
     
-    # Load config.yaml
-    config_path = project_root / "config" / "config.yaml"
+    # Load config.yaml (or use defaults if not found)
+    config_path = get_project_root() / "config" / "config.yaml"
     
-    if not config_path.exists():
-        # Fall back to template
-        config_path = project_root / "config" / "config.template.yaml"
+    if config_path.exists():
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f) or {}
+    else:
+        # Default configuration
+        config = {
+            "cryptoquant": {"api_key": ""},
+            "fred": {"api_key": ""},
+            "data": {"btc_source": "yahoo", "history_years": 3},
+            "model": {"n_paths": 100000, "horizon_days": 30},
+            "risk": {"margin_call_ltv": 0.85, "liquidation_ltv": 0.95},
+        }
     
-    if not config_path.exists():
-        raise FileNotFoundError(
-            f"Config file not found. Expected at {config_path}\n"
-            f"Run: cp config/config.template.yaml config/config.yaml"
-        )
+    # Ensure nested dicts exist
+    config.setdefault("cryptoquant", {})
+    config.setdefault("fred", {})
     
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    # Override with Streamlit secrets (highest priority)
+    streamlit_cryptoquant = _get_streamlit_secret("CRYPTOQUANT_API_KEY")
+    if streamlit_cryptoquant:
+        config["cryptoquant"]["api_key"] = streamlit_cryptoquant
     
-    # Override with environment variables if present
+    streamlit_fred = _get_streamlit_secret("FRED_API_KEY")
+    if streamlit_fred:
+        config["fred"]["api_key"] = streamlit_fred
+    
+    # Override with environment variables (second priority)
     if os.getenv("CRYPTOQUANT_API_KEY"):
         config["cryptoquant"]["api_key"] = os.getenv("CRYPTOQUANT_API_KEY")
     
@@ -80,7 +113,7 @@ def get_api_key(service: str) -> str:
     if not key or key.startswith("your_"):
         raise ValueError(
             f"API key for {service} not configured. "
-            f"Set {service.upper()}_API_KEY in .env or config/config.yaml"
+            f"Set {service.upper()}_API_KEY in environment, .env, or Streamlit secrets"
         )
     
     return key
