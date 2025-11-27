@@ -1,0 +1,51 @@
+# BitVault Risk Model Configuration
+# Copy this to config.yaml and fill in your API keys
+
+# API Keys
+cryptoquant:
+  api_key: "your_cryptoquant_api_key_here"
+  base_url: "https://api.cryptoquant.com"
+
+fred:
+  api_key: "your_fred_api_key_here"
+
+# Database
+database:
+  path: "data/btc_risk.db"
+
+# Model Parameters (defaults - will be overwritten by calibration)
+model:
+  # GARCH(1,1) initial guesses
+  garch:
+    omega: 0.00001
+    alpha: 0.1
+    beta: 0.85
+  
+  # Jump diffusion
+  jump:
+    lambda_annual: 10  # jumps per year
+    mu_jump: -0.07     # mean jump size (negative = crashes)
+    sigma_jump: 0.05   # jump size volatility
+  
+  # Simulation
+  simulation:
+    n_paths: 100000
+    horizon_days: 30
+    random_seed_base: 42
+
+# Risk Thresholds
+risk:
+  margin_call_ltv: 0.85
+  liquidation_ltv: 0.95
+
+# Regime Classification Thresholds
+regime:
+  exchange_netflow_zscore: -2.0  # trigger if below this
+  funding_rate_threshold: -0.0005  # -0.05%
+  open_interest_drop_threshold: -0.20  # -20% over 7 days
+  vix_threshold: 30
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/risk_model.log"
