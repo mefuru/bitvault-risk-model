@@ -16,9 +16,10 @@ A Monte Carlo simulation engine for managing Bitcoin-collateralized loan risk. B
 8. [Using the Model](#using-the-model)
 9. [Backtesting](#backtesting)
 10. [Model Methodology](#model-methodology)
-11. [Configuration](#configuration)
-12. [Troubleshooting](#troubleshooting)
-13. [Extending the Model](#extending-the-model)
+11. [Data Frequency Analysis](#data-frequency-analysis)
+12. [Configuration](#configuration)
+13. [Troubleshooting](#troubleshooting)
+14. [Extending the Model](#extending-the-model)
 
 ---
 
@@ -86,6 +87,7 @@ The dashboard opens at `http://localhost:8501`. Enter your portfolio details and
 ### The Problem
 
 You have a loan secured by Bitcoin:
+
 - **Collateral**: 100 BTC
 - **Loan Amount**: $5,350,000
 - **Accrued Interest**: $20,858
@@ -100,6 +102,7 @@ LTV = Total Debt / Collateral Value
 ```
 
 If BTC price drops, your LTV increases. At certain thresholds:
+
 - **85% LTV → Margin Call**: Borrower must add collateral or repay debt
 - **95% LTV → Liquidation**: Protocol forcibly sells collateral
 
@@ -261,14 +264,14 @@ bitvault-risk-model/
 
 ### Key Files Explained
 
-| File | Purpose |
-|------|---------|
-| `src/model/garch.py` | Fits a GARCH(1,1) model to historical BTC returns to estimate volatility dynamics |
-| `src/model/simulation.py` | Runs Monte Carlo simulation with GARCH volatility and jump diffusion |
-| `src/risk/ltv.py` | Calculates LTV ratios, threshold prices, and breach probabilities |
-| `src/regime/classifier.py` | Detects whether market is in "normal" or "stress" regime |
-| `src/dashboard/app.py` | Streamlit web application for interactive risk analysis |
-| `src/backtest/runner.py` | Runs historical backtests to validate model accuracy |
+| File                       | Purpose                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| `src/model/garch.py`       | Fits a GARCH(1,1) model to historical BTC returns to estimate volatility dynamics |
+| `src/model/simulation.py`  | Runs Monte Carlo simulation with GARCH volatility and jump diffusion              |
+| `src/risk/ltv.py`          | Calculates LTV ratios, threshold prices, and breach probabilities                 |
+| `src/regime/classifier.py` | Detects whether market is in "normal" or "stress" regime                          |
+| `src/dashboard/app.py`     | Streamlit web application for interactive risk analysis                           |
+| `src/backtest/runner.py`   | Runs historical backtests to validate model accuracy                              |
 
 ---
 
@@ -278,12 +281,12 @@ The model requires historical data to calibrate its parameters. Here's what we f
 
 ### Data Sources
 
-| Data | Source | Purpose | Update Frequency |
-|------|--------|---------|------------------|
-| BTC Price | Yahoo Finance | GARCH calibration, current price | Daily |
-| VIX | Yahoo Finance | Regime detection (fear gauge) | Daily |
-| S&P 500 | Yahoo Finance | Regime detection (correlation) | Daily |
-| Fed Funds Rate | FRED API | Macro context | Monthly |
+| Data           | Source        | Purpose                          | Update Frequency |
+| -------------- | ------------- | -------------------------------- | ---------------- |
+| BTC Price      | Yahoo Finance | GARCH calibration, current price | Daily            |
+| VIX            | Yahoo Finance | Regime detection (fear gauge)    | Daily            |
+| S&P 500        | Yahoo Finance | Regime detection (correlation)   | Daily            |
+| Fed Funds Rate | FRED API      | Macro context                    | Monthly          |
 
 ### Initial Data Backfill
 
@@ -330,6 +333,7 @@ Data becomes stale over time. To fetch the latest:
 Click the "🔄 Refresh Data" button in the sidebar.
 
 **Option 2: From command line**
+
 ```bash
 PYTHONPATH=. python -c "from src.data.refresh import refresh_all_data; refresh_all_data()"
 ```
@@ -359,17 +363,20 @@ This opens your browser to `http://localhost:8501`.
 1. **Live BTC Price**: Fetched from Yahoo Finance on page load
 
 2. **Data Status**: Shows when data was last updated
+
    - Green: Data is current
    - Yellow: Data is 2+ days old
    - Red: Data is 7+ days old (refresh recommended)
 
 3. **Portfolio Settings**:
+
    - **BTC Collateral**: Number of BTC in the position
    - **Loan Amount**: Principal borrowed (in USD)
    - **Accrued Interest**: Interest accumulated (in USD)
    - **Total Debt**: Automatically calculated (Loan + Interest)
 
-4. **Market Regime**: 
+4. **Market Regime**:
+
    - **Auto**: Automatically detects based on VIX, volatility, drawdown
    - **Normal**: Standard market conditions
    - **Stress**: Elevated tail risk assumptions
@@ -381,12 +388,14 @@ This opens your browser to `http://localhost:8501`.
 After running a simulation:
 
 1. **Executive Summary**: Key metrics at a glance
+
    - Current BTC Price
    - Current LTV
    - P(Margin Call) - probability of hitting 85% LTV
    - P(Liquidation) - probability of hitting 95% LTV
 
 2. **Price Paths Chart**: Visualizes simulated price trajectories
+
    - Shaded bands show 5th-95th and 25th-75th percentiles
    - Horizontal lines mark margin call and liquidation prices
 
@@ -410,11 +419,13 @@ P(Liquidation) = 0.37%
 ```
 
 This means:
+
 - Out of 100,000 simulated scenarios, 1,580 hit the margin call price within 30 days
 - 370 scenarios hit the liquidation price
 - Your position is relatively safe, but not risk-free
 
 **When to worry:**
+
 - P(Margin Call) > 10%: Consider reducing loan or adding collateral
 - P(Liquidation) > 5%: Urgent action recommended
 
@@ -427,11 +438,13 @@ This means:
 You can run analyses without the dashboard:
 
 #### Run Monte Carlo Simulation
+
 ```bash
 PYTHONPATH=. python -m src.model.simulation
 ```
 
 Options:
+
 ```bash
 # More paths for higher precision
 PYTHONPATH=. python -m src.model.simulation --paths=200000
@@ -441,16 +454,19 @@ PYTHONPATH=. python -m src.model.simulation --stress
 ```
 
 #### Analyze a Portfolio
+
 ```bash
 PYTHONPATH=. python -m src.risk.ltv --btc=100 --loan=5350000 --interest=20858
 ```
 
 #### Check Market Regime
+
 ```bash
 PYTHONPATH=. python -m src.regime.classifier
 ```
 
 #### Calibrate GARCH Model
+
 ```bash
 # Calibrate and save to database
 PYTHONPATH=. python -m src.model.garch --save
@@ -523,6 +539,7 @@ For risk management, **slight overestimation is preferred**. It's better to be c
 #### Brier Score
 
 Measures prediction accuracy:
+
 - **0.0** = Perfect predictions
 - **0.25** = Random guessing
 - **< 0.10** = Good
@@ -531,11 +548,11 @@ Measures prediction accuracy:
 
 #### Example Results
 
-| Drop | Predicted | Actual | Error |
-|------|-----------|--------|-------|
-| ≥5% | 61.7% | 53.1% | +8.6% |
-| ≥10% | 39.9% | 22.1% | +17.8% |
-| ≥20% | 13.0% | 0.7% | +12.4% |
+| Drop | Predicted | Actual | Error  |
+| ---- | --------- | ------ | ------ |
+| ≥5%  | 61.7%     | 53.1%  | +8.6%  |
+| ≥10% | 39.9%     | 22.1%  | +17.8% |
+| ≥20% | 13.0%     | 0.7%   | +12.4% |
 
 **Interpretation**: The model predicted a 13% chance of ≥20% drops, but only 0.7% actually occurred. The model is conservative—it overestimates risk. For a risk management tool, this is acceptable because it provides a safety margin.
 
@@ -552,6 +569,7 @@ Bitcoin volatility is not constant—it clusters. Periods of high volatility ten
 ```
 
 Where:
+
 - `σ²(t)` = today's variance
 - `ω` = long-run variance component
 - `α` = reaction to recent shocks
@@ -559,6 +577,7 @@ Where:
 - `r(t-1)` = yesterday's return
 
 **Parameters from calibration:**
+
 - `α ≈ 0.10`: Volatility reacts moderately to shocks
 - `β ≈ 0.79`: Volatility is persistent (decays slowly)
 - `α + β ≈ 0.89`: High persistence, volatility mean-reverts over ~6 days
@@ -572,6 +591,7 @@ dS/S = μ·dt + σ·dW + J·dN
 ```
 
 Where:
+
 - `μ` = drift (average daily return)
 - `σ` = volatility from GARCH
 - `dW` = Brownian motion (normal randomness)
@@ -579,6 +599,7 @@ Where:
 - `dN` = Poisson process (random jump timing)
 
 **Calibrated from historical data:**
+
 - ~6 jumps per year
 - Average jump size: -7.9%
 - This captures events like COVID crash, LUNA collapse, FTX bankruptcy
@@ -587,12 +608,13 @@ Where:
 
 The model detects two regimes:
 
-| Regime | Condition | Model Adjustment |
-|--------|-----------|------------------|
-| **Normal** | Low VIX, stable volatility, no drawdown | Standard parameters |
+| Regime     | Condition                                       | Model Adjustment                       |
+| ---------- | ----------------------------------------------- | -------------------------------------- |
+| **Normal** | Low VIX, stable volatility, no drawdown         | Standard parameters                    |
 | **Stress** | VIX > 30, elevated volatility, or >15% drawdown | 1.5x volatility multiplier, zero drift |
 
 Regime detection uses:
+
 1. **VIX level**: Above 30 = fear in equity markets
 2. **BTC volatility**: Current vs. 90-day average
 3. **BTC drawdown**: Current price vs. 30-day high
@@ -609,15 +631,80 @@ Where:
 ```
 
 **Price at Target LTV:**
+
 ```
 Price = Total Debt / (Target LTV × BTC Quantity)
 ```
 
 **Example:**
+
 - Total Debt: $5,370,858
 - BTC Quantity: 100
 - Target LTV: 85% (margin call)
 - Margin Call Price = $5,370,858 / (0.85 × 100) = $63,187
+
+---
+
+## Data Frequency Analysis
+
+### Why Daily Data is Sufficient
+
+A common question is whether capturing data more frequently (hourly, 4x daily) would improve simulation accuracy. **For this model's use case, daily data is optimal.**
+
+### The Analysis
+
+| Factor                   | Finding                                                           |
+| ------------------------ | ----------------------------------------------------------------- |
+| **Decision Horizon**     | 30-day LTV risk assessments—not intraday trading decisions        |
+| **GARCH Aggregation**    | Volatility forecasts converge regardless of calibration frequency |
+| **Backtest Results**     | Model already overestimates risk by ~10% (conservative)           |
+| **Microstructure Noise** | Hourly data picks up bid-ask bounce and time-of-day artifacts     |
+| **Computational Cost**   | Hourly simulation requires 24x more steps for marginal benefit    |
+
+### When Higher Frequency Helps vs. Doesn't Help
+
+| Change                                        | Worth Doing? | Impact                                                |
+| --------------------------------------------- | ------------ | ----------------------------------------------------- |
+| Switch simulation to hourly steps             | ❌ No        | Negligible—30-day horizon averages out intraday noise |
+| Capture data 4x daily for price history       | ❌ No        | Adds storage/complexity without accuracy improvement  |
+| Use intraday data for **realized volatility** | ✅ Yes       | Moderate—better current vol estimate                  |
+| Use intraday data for **jump detection**      | ✅ Maybe     | Low-Moderate—captures flash crash magnitudes          |
+| More frequent regime detection                | ⚠️ Optional  | Low—could switch to stress mode hours earlier         |
+
+### Recommended Enhancements (If Pursuing Intraday Data)
+
+If you want to improve model accuracy using higher-frequency data, focus on:
+
+1. **Realized Volatility Calculation**
+
+   Instead of relying solely on daily close-to-close returns, calculate realized volatility from intraday data:
+
+   ```python
+   # Using 5-minute returns to estimate daily realized vol
+   intraday_returns = get_5min_returns()  # 288 points per day
+   realized_var = (intraday_returns ** 2).sum()  # Sum of squared returns
+   ```
+
+   This provides a better estimate of _today's volatility_ as input to GARCH, without changing simulation frequency.
+
+2. **Jump Detection Enhancement**
+
+   Flash crashes often recover within hours (e.g., March 2020 had an intraday low 10% below daily close). Intraday data helps capture:
+
+   - True jump magnitudes (not dampened by daily aggregation)
+   - More jump events that were "hidden" in daily data
+
+3. **Keep Daily Simulation Steps**
+
+   Your 30-day horizon and weekly recalibration cycle don't benefit from hourly simulation granularity. The computational cost (24x more steps) provides negligible accuracy improvement.
+
+### Priority Recommendation
+
+For improving model accuracy, prioritize in this order:
+
+1. **On-chain data integration** (exchange flows, funding rates)—adds _new information_
+2. **Realized volatility from hourly data**—improves current vol estimation
+3. **Keep daily simulation**—appropriate for 30-day risk horizon
 
 ---
 
@@ -638,14 +725,14 @@ CRYPTOQUANT_API_KEY=your_key_here
 ```yaml
 # Data settings
 data:
-  btc_source: yahoo  # yahoo or cryptoquant
+  btc_source: yahoo # yahoo or cryptoquant
   history_years: 3
 
 # Model settings
 model:
   n_paths: 100000
   horizon_days: 30
-  
+
 # Risk thresholds
 risk:
   margin_call_ltv: 0.85
@@ -680,11 +767,13 @@ class LTVThresholds:
 **Cause**: Python doesn't know where to find the `src` package.
 
 **Solution**: Always run with `PYTHONPATH=.`:
+
 ```bash
 PYTHONPATH=. python -m src.model.simulation
 ```
 
 Or add to your shell profile:
+
 ```bash
 echo 'export PYTHONPATH=".:$PYTHONPATH"' >> ~/.zshrc
 source ~/.zshrc
@@ -695,6 +784,7 @@ source ~/.zshrc
 **Cause**: Historical data hasn't been backfilled.
 
 **Solution**: Run the backfill commands:
+
 ```bash
 PYTHONPATH=. python -m src.data.prices --backfill 3
 PYTHONPATH=. python -m src.data.macro --backfill 3
@@ -705,6 +795,7 @@ PYTHONPATH=. python -m src.data.macro --backfill 3
 **Cause**: Price data is stale.
 
 **Solution**: Click "🔄 Refresh Data" in the dashboard sidebar, or:
+
 ```bash
 PYTHONPATH=. python -c "from src.data.refresh import refresh_all_data; refresh_all_data()"
 ```
@@ -713,7 +804,8 @@ PYTHONPATH=. python -c "from src.data.refresh import refresh_all_data; refresh_a
 
 **Cause**: Usually insufficient data or extreme values.
 
-**Solution**: 
+**Solution**:
+
 1. Check you have enough historical data (~1,000+ days)
 2. Re-run calibration: `PYTHONPATH=. python -m src.model.garch --save`
 
@@ -722,6 +814,7 @@ PYTHONPATH=. python -c "from src.data.refresh import refresh_all_data; refresh_a
 **Cause**: GARCH parameters may be stale.
 
 **Solution**: Recalibrate:
+
 ```bash
 PYTHONPATH=. python -m src.model.garch --save
 ```
@@ -731,6 +824,7 @@ PYTHONPATH=. python -m src.model.garch --save
 **Cause**: Your position is already near margin call (>90% LTV).
 
 **Solution**: This is a validation check. Either:
+
 1. The position genuinely needs immediate attention
 2. Double-check your input values
 
@@ -780,7 +874,7 @@ The current model analyzes one position at a time. To track multiple:
 
 To get notifications when risk exceeds thresholds:
 
-1. Add email/Slack integration to `src/` 
+1. Add email/Slack integration to `src/`
 2. Create a scheduled job that runs the simulation
 3. Trigger alerts when P(Margin Call) exceeds your threshold
 
@@ -797,6 +891,7 @@ PYTHONPATH=. pytest tests/
 ### Code Style
 
 The codebase follows these conventions:
+
 - Type hints for function signatures
 - Dataclasses for structured data
 - Docstrings for public functions
@@ -826,6 +921,7 @@ Internal use only - BitVault proprietary.
 ## Support
 
 For issues or questions:
+
 1. Check this README's troubleshooting section
 2. Check `logs/` for error details
 3. Contact the development team
@@ -835,6 +931,7 @@ For issues or questions:
 ## Changelog
 
 ### v1.0.0 (2024-11)
+
 - Initial release
 - GARCH(1,1) volatility model
 - Monte Carlo simulation with jump diffusion

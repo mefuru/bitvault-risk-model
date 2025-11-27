@@ -14,13 +14,13 @@ The core functionality has been implemented in a single development session. Thi
 
 ## Status Overview
 
-| Phase | Original Timeline | Status | Notes |
-|-------|------------------|--------|-------|
-| Phase 1: Data Pipeline | Week 1 | ✅ Complete | Using Yahoo Finance (CryptoQuant API not accessible) |
-| Phase 2: Core Model | Week 2-3 | ✅ Complete | GARCH + Jump Diffusion + Monte Carlo |
-| Phase 3: Regime Classification | Week 4 | ✅ Complete | Using VIX, volatility, drawdown, correlation |
-| Phase 4: Dashboard | Week 5-6 | ✅ Complete | Streamlit with all visualizations |
-| Phase 5: Production Hardening | Week 7-8 | ⚠️ Partial | Validation done, scheduling deferred |
+| Phase                          | Original Timeline | Status      | Notes                                                |
+| ------------------------------ | ----------------- | ----------- | ---------------------------------------------------- |
+| Phase 1: Data Pipeline         | Week 1            | ✅ Complete | Using Yahoo Finance (CryptoQuant API not accessible) |
+| Phase 2: Core Model            | Week 2-3          | ✅ Complete | GARCH + Jump Diffusion + Monte Carlo                 |
+| Phase 3: Regime Classification | Week 4            | ✅ Complete | Using VIX, volatility, drawdown, correlation         |
+| Phase 4: Dashboard             | Week 5-6          | ✅ Complete | Streamlit with all visualizations                    |
+| Phase 5: Production Hardening  | Week 7-8          | ⚠️ Partial  | Validation done, scheduling deferred                 |
 
 ---
 
@@ -28,28 +28,28 @@ The core functionality has been implemented in a single development session. Thi
 
 ### What Was Built
 
-| Component | File | Status |
-|-----------|------|--------|
-| Database schema | `src/data/database.py` | ✅ SQLite with all tables |
-| BTC price fetcher | `src/data/prices.py` | ✅ Yahoo Finance (CryptoQuant fallback ready) |
-| Macro data fetcher | `src/data/macro.py` | ✅ VIX, S&P 500, Fed Funds Rate |
-| Data refresh utility | `src/data/refresh.py` | ✅ Dashboard integration |
-| Configuration | `src/config.py` | ✅ Environment variable support |
+| Component            | File                   | Status                                        |
+| -------------------- | ---------------------- | --------------------------------------------- |
+| Database schema      | `src/data/database.py` | ✅ SQLite with all tables                     |
+| BTC price fetcher    | `src/data/prices.py`   | ✅ Yahoo Finance (CryptoQuant fallback ready) |
+| Macro data fetcher   | `src/data/macro.py`    | ✅ VIX, S&P 500, Fed Funds Rate               |
+| Data refresh utility | `src/data/refresh.py`  | ✅ Dashboard integration                      |
+| Configuration        | `src/config.py`        | ✅ Environment variable support               |
 
 ### What Was Deferred
 
-| Component | Reason | Future Work |
-|-----------|--------|-------------|
+| Component               | Reason                              | Future Work                                                      |
+| ----------------------- | ----------------------------------- | ---------------------------------------------------------------- |
 | CryptoQuant integration | API tier doesn't include API access | Upgrade CryptoQuant plan or use alternative on-chain data source |
-| Exchange netflows | Requires CryptoQuant API | Could integrate Glassnode or alternative |
-| Funding rates | Requires CryptoQuant API | Could fetch from exchange APIs directly |
-| Open interest | Requires CryptoQuant API | Could fetch from Coinglass or similar |
+| Exchange netflows       | Requires CryptoQuant API            | Could integrate Glassnode or alternative                         |
+| Funding rates           | Requires CryptoQuant API            | Could fetch from exchange APIs directly                          |
+| Open interest           | Requires CryptoQuant API            | Could fetch from Coinglass or similar                            |
 
 ### Validation Results
 
 ```
 BTC Prices: 1,095 rows (3 years)
-VIX: ~750 rows  
+VIX: ~750 rows
 S&P 500: ~750 rows
 Fed Funds: ~36 rows (monthly)
 ```
@@ -60,12 +60,12 @@ Fed Funds: ~36 rows (monthly)
 
 ### What Was Built
 
-| Component | File | Status |
-|-----------|------|--------|
-| GARCH(1,1) fitting | `src/model/garch.py` | ✅ Full implementation with diagnostics |
-| Monte Carlo engine | `src/model/simulation.py` | ✅ 100k paths, vectorized |
-| Jump diffusion | `src/model/simulation.py` | ✅ Merton model integrated |
-| LTV calculations | `src/risk/ltv.py` | ✅ Matches spreadsheet methodology |
+| Component          | File                      | Status                                  |
+| ------------------ | ------------------------- | --------------------------------------- |
+| GARCH(1,1) fitting | `src/model/garch.py`      | ✅ Full implementation with diagnostics |
+| Monte Carlo engine | `src/model/simulation.py` | ✅ 100k paths, vectorized               |
+| Jump diffusion     | `src/model/simulation.py` | ✅ Merton model integrated              |
+| LTV calculations   | `src/risk/ltv.py`         | ✅ Matches spreadsheet methodology      |
 
 ### GARCH Calibration Results
 
@@ -99,34 +99,34 @@ Parameters (calibrated on 3 years of data):
 
 ### What Was Built
 
-| Component | File | Status |
-|-----------|------|--------|
+| Component         | File                       | Status                   |
+| ----------------- | -------------------------- | ------------------------ |
 | Regime classifier | `src/regime/classifier.py` | ✅ Four-indicator system |
-| Auto-detection | Dashboard integration | ✅ Default mode |
+| Auto-detection    | Dashboard integration      | ✅ Default mode          |
 
 ### Indicators Implemented
 
-| Indicator | Threshold | Data Source | Status |
-|-----------|-----------|-------------|--------|
-| VIX | > 30 | Yahoo Finance | ✅ |
-| BTC Volatility | > 1.5x average | Calculated | ✅ |
-| BTC Drawdown | > 15% from 30-day high | Calculated | ✅ |
-| BTC-S&P Correlation | > 0.7 during selloff | Calculated | ✅ |
+| Indicator           | Threshold              | Data Source   | Status |
+| ------------------- | ---------------------- | ------------- | ------ |
+| VIX                 | > 30                   | Yahoo Finance | ✅     |
+| BTC Volatility      | > 1.5x average         | Calculated    | ✅     |
+| BTC Drawdown        | > 15% from 30-day high | Calculated    | ✅     |
+| BTC-S&P Correlation | > 0.7 during selloff   | Calculated    | ✅     |
 
 ### What Was Deferred (Requires On-Chain Data)
 
-| Indicator | Reason |
-|-----------|--------|
-| Exchange netflows | CryptoQuant API not accessible |
-| Funding rates | CryptoQuant API not accessible |
+| Indicator             | Reason                         |
+| --------------------- | ------------------------------ |
+| Exchange netflows     | CryptoQuant API not accessible |
+| Funding rates         | CryptoQuant API not accessible |
 | Open interest changes | CryptoQuant API not accessible |
 
 ### Regime Adjustments
 
-| Regime | Volatility Multiplier | Drift | Jump Intensity |
-|--------|----------------------|-------|----------------|
-| Normal | 1.0x | Calibrated μ | Calibrated λ |
-| Stress | 1.5x | 0 | 1.5x λ |
+| Regime | Volatility Multiplier | Drift        | Jump Intensity |
+| ------ | --------------------- | ------------ | -------------- |
+| Normal | 1.0x                  | Calibrated μ | Calibrated λ   |
+| Stress | 1.5x                  | 0            | 1.5x λ         |
 
 ---
 
@@ -134,17 +134,17 @@ Parameters (calibrated on 3 years of data):
 
 ### What Was Built
 
-| Component | File | Status |
-|-----------|------|--------|
-| Streamlit app | `src/dashboard/app.py` | ✅ Full implementation |
-| Price paths chart | Plotly integration | ✅ Percentile bands + thresholds |
-| Distribution histogram | Plotly integration | ✅ With threshold markers |
-| Probability table | Styled dataframe | ✅ Color-coded |
-| LTV scenario table | Styled dataframe | ✅ Status indicators |
-| VaR metrics | Metric cards | ✅ 1%, 5%, 10% levels |
-| Live price | Yahoo Finance | ✅ Fetched on load |
-| Data refresh | Button + status | ✅ With freshness indicator |
-| Regime detection | Auto + manual override | ✅ Shows indicator breakdown |
+| Component              | File                   | Status                           |
+| ---------------------- | ---------------------- | -------------------------------- |
+| Streamlit app          | `src/dashboard/app.py` | ✅ Full implementation           |
+| Price paths chart      | Plotly integration     | ✅ Percentile bands + thresholds |
+| Distribution histogram | Plotly integration     | ✅ With threshold markers        |
+| Probability table      | Styled dataframe       | ✅ Color-coded                   |
+| LTV scenario table     | Styled dataframe       | ✅ Status indicators             |
+| VaR metrics            | Metric cards           | ✅ 1%, 5%, 10% levels            |
+| Live price             | Yahoo Finance          | ✅ Fetched on load               |
+| Data refresh           | Button + status        | ✅ With freshness indicator      |
+| Regime detection       | Auto + manual override | ✅ Shows indicator breakdown     |
 
 ### Dashboard Features
 
@@ -158,11 +158,11 @@ Parameters (calibrated on 3 years of data):
 
 ### What Was Deferred
 
-| Feature | Reason | Future Work |
-|---------|--------|-------------|
-| PDF export | Time constraint | Add reportlab integration |
-| Multiple portfolios | Single position sufficient for MVP | Add portfolio list/selector |
-| Historical comparison | Time constraint | Show how risk evolved over time |
+| Feature               | Reason                             | Future Work                     |
+| --------------------- | ---------------------------------- | ------------------------------- |
+| PDF export            | Time constraint                    | Add reportlab integration       |
+| Multiple portfolios   | Single position sufficient for MVP | Add portfolio list/selector     |
+| Historical comparison | Time constraint                    | Show how risk evolved over time |
 
 ---
 
@@ -170,15 +170,15 @@ Parameters (calibrated on 3 years of data):
 
 ### What Was Built
 
-| Component | File | Status |
-|-----------|------|--------|
-| Logging | `src/logging_config.py` | ✅ File + console handlers |
-| Input validation | `src/validation.py` | ✅ Portfolio + data freshness |
-| Output validation | `src/validation.py` | ✅ Sanity checks on results |
-| Error handling | Throughout codebase | ✅ Try/catch + graceful errors |
-| Backtesting | `src/backtest/runner.py` | ✅ Full framework |
-| Backtest reports | `src/backtest/report.py` | ✅ HTML with charts |
-| Documentation | `README.md` | ✅ Comprehensive guide |
+| Component         | File                     | Status                         |
+| ----------------- | ------------------------ | ------------------------------ |
+| Logging           | `src/logging_config.py`  | ✅ File + console handlers     |
+| Input validation  | `src/validation.py`      | ✅ Portfolio + data freshness  |
+| Output validation | `src/validation.py`      | ✅ Sanity checks on results    |
+| Error handling    | Throughout codebase      | ✅ Try/catch + graceful errors |
+| Backtesting       | `src/backtest/runner.py` | ✅ Full framework              |
+| Backtest reports  | `src/backtest/report.py` | ✅ HTML with charts            |
+| Documentation     | `README.md`              | ✅ Comprehensive guide         |
 
 ### Backtest Results
 
@@ -197,13 +197,13 @@ By Threshold:
 
 ### What Was Deferred
 
-| Component | Reason | Future Work |
-|-----------|--------|-------------|
-| Automated daily execution | Fast runtime makes manual acceptable | Add cron/launchd if needed |
-| Email alerting | Not critical for MVP | Add when P(liquidation) thresholds needed |
-| AWS deployment | Local deployment sufficient | Terraform/CDK if cloud needed |
-| CI/CD pipeline | Manual testing sufficient | Add GitHub Actions |
-| Unit tests | Integration tests via backtest | Add pytest suite |
+| Component                 | Reason                               | Future Work                               |
+| ------------------------- | ------------------------------------ | ----------------------------------------- |
+| Automated daily execution | Fast runtime makes manual acceptable | Add cron/launchd if needed                |
+| Email alerting            | Not critical for MVP                 | Add when P(liquidation) thresholds needed |
+| AWS deployment            | Local deployment sufficient          | Terraform/CDK if cloud needed             |
+| CI/CD pipeline            | Manual testing sufficient            | Add GitHub Actions                        |
+| Unit tests                | Integration tests via backtest       | Add pytest suite                          |
 
 ---
 
@@ -215,7 +215,7 @@ By Threshold:
 src/
 ├── __init__.py
 ├── config.py                 # Configuration loading
-├── logging_config.py         # Logging setup  
+├── logging_config.py         # Logging setup
 ├── validation.py             # Input/output validation
 │
 ├── data/
@@ -271,11 +271,62 @@ README.md                     # Comprehensive documentation
 
 ---
 
+## Data Frequency Analysis ✅ ANALYZED
+
+### Decision: Daily Data is Optimal
+
+Evaluated whether higher-frequency data (hourly, 4x daily) would improve simulation accuracy.
+
+### Analysis Summary
+
+| Factor               | Finding                                                           |
+| -------------------- | ----------------------------------------------------------------- |
+| Decision Horizon     | 30-day LTV risk—not intraday trading                              |
+| GARCH Aggregation    | Volatility forecasts converge regardless of calibration frequency |
+| Backtest Results     | Model already overestimates risk by ~10% (conservative)           |
+| Microstructure Noise | Hourly data picks up bid-ask bounce, time-of-day artifacts        |
+| Computational Cost   | Hourly = 24x more simulation steps for marginal benefit           |
+
+### Evaluation Results
+
+| Change                                    | Worth Doing? | Impact                                       |
+| ----------------------------------------- | ------------ | -------------------------------------------- |
+| Switch simulation to hourly steps         | ❌ No        | Negligible                                   |
+| Capture data 4x daily                     | ❌ No        | Adds complexity without accuracy improvement |
+| Use intraday data for realized volatility | ✅ Yes       | Moderate—better current vol estimate         |
+| Use intraday data for jump detection      | ✅ Maybe     | Captures flash crash magnitudes              |
+| More frequent regime detection            | ⚠️ Optional  | Could switch to stress mode hours earlier    |
+
+### Recommendation
+
+Keep daily simulation steps. If pursuing intraday data, use it for:
+
+1. Realized volatility calculation (input to GARCH)
+2. Jump detection enhancement (capture true flash crash magnitudes)
+
+---
+
+## CryptoQuant Tier Analysis ✅ ANALYZED
+
+### Recommended Tier: Pro Plan ($49/month)
+
+For on-chain data integration (Priority 1 in v2 roadmap), analyzed CryptoQuant pricing tiers.
+
+| Tier                  | API Calls/min | Real-time Data  | Historical Export | Suitable? |
+| --------------------- | ------------- | --------------- | ----------------- | --------- |
+| Free                  | 10            | ❌ 15-min delay | ❌                | No        |
+| Pro ($49/mo)          | 100           | ✅              | ✅                | ✅ Yes    |
+| Institution ($299/mo) | 1,000         | ✅              | ✅                | Overkill  |
+
+**Pro Plan provides:** All on-chain metrics (netflows, funding rates, OI), real-time data, historical export, 100 API calls/min—sufficient for daily/periodic regime detection.
+
+---
+
 ## Future Enhancements (v2 Roadmap)
 
 ### Priority 1: On-Chain Data Integration
 
-If CryptoQuant API access is obtained (or alternative source):
+If CryptoQuant Pro subscription is obtained (or alternative source):
 
 1. Add exchange netflow indicator to regime classifier
 2. Add funding rate indicator
@@ -371,12 +422,13 @@ PYTHONPATH=. python -c "from src.data.refresh import refresh_all_data; refresh_a
 
 ### Key Technical Decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| SQLite over PostgreSQL | Single-user, local deployment; simpler setup |
-| Yahoo Finance over CryptoQuant | API accessibility; free; reliable |
-| Streamlit over Dash/Flask | Faster development; good enough for internal tool |
-| Conservative parameters | Risk management tool should err on side of caution |
+| Decision                       | Rationale                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------ |
+| SQLite over PostgreSQL         | Single-user, local deployment; simpler setup                                         |
+| Yahoo Finance over CryptoQuant | API accessibility; free; reliable                                                    |
+| Streamlit over Dash/Flask      | Faster development; good enough for internal tool                                    |
+| Conservative parameters        | Risk management tool should err on side of caution                                   |
+| Daily data frequency           | 30-day horizon doesn't benefit from intraday granularity; GARCH aggregation property |
 
 ---
 
@@ -403,4 +455,5 @@ The backtest shows the model overestimates risk by ~10%, which is acceptable for
 
 ---
 
-*Plan last updated: November 27, 2025*
+_Plan last updated: November 27, 2025_  
+_Added: Data Frequency Analysis, CryptoQuant Tier Analysis_
