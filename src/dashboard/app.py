@@ -155,6 +155,16 @@ def initialize_cloud_data():
                     logger.warning("CryptoQuant module not available")
                 except Exception as e:
                     logger.error(f"Failed to backfill CryptoQuant: {e}")
+                
+                # Calibrate GARCH model and save to DB for consistency
+                try:
+                    from src.model.garch import GARCHModel
+                    garch = GARCHModel()
+                    params = garch.fit()
+                    garch.save_calibration(params)
+                    logger.info(f"Calibrated GARCH model: vol={params.long_run_volatility:.1f}%")
+                except Exception as e:
+                    logger.error(f"Failed to calibrate GARCH: {e}")
             
             return "initialized"
         else:
@@ -269,15 +279,37 @@ def run_analysis(btc_collateral: float, loan_amount: float, accrued_interest: fl
         
         calculator = LTVRiskCalculator()
         
-        # Run simulation
+        # Run simulation with fixed seed for reproducibility
         engine = MonteCarloEngine()
+        
+        # Load GARCH params to ensure consistency
+        garch_params = engine.garch_model.load_latest_calibration()
+        
         sim_results = engine.run(
             n_paths=100_000,
             horizon_days=30,
             regime=regime,
             current_price=current_price,
-            store_paths=True
+            store_paths=True,
+            random_seed=42,  # Fixed seed for reproducibility
+            garch_params=garch_params
         )
+        
+        # Store debug info in session state
+        st.session_state.debug_info = {
+            'current_price': current_price,
+            'garch_params': {
+                'omega': garch_params.omega if garch_params else None,
+                'alpha': garch_params.alpha if garch_params else None,
+                'beta': garch_params.beta if garch_params else None,
+                'mu': garch_params.mu if garch_params else None,
+                'long_run_vol': garch_params.long_run_volatility if garch_params else None,
+            } if garch_params else None,
+            'regime': regime,
+            'sim_mean': sim_results.mean_price,
+            'sim_p5': sim_results.percentile_5,
+            'sim_p95': sim_results.percentile_95,
+        }
         
         # Calculate risk metrics
         risk_metrics = calculator.calculate_risk(
@@ -1156,6 +1188,45 @@ if st.session_state.simulation_results is not None:
     
     # Footer
     st.divider()
+    
+    # Debug info expander for troubleshooting differences
+    with st.expander("🔧 Debug Info (for troubleshooting)", expanded=False):
+        if 'debug_info' in st.session_state and st.session_state.debug_info:
+            debug = st.session_state.debug_info
+            st.markdown("### Simulation Inputs")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"""
+                **Price & Regime:**
+                - Current Price: ${debug.get('current_price', 'N/A'):,.2f}
+                - Regime: {debug.get('regime', 'N/A')}
+                - Random Seed: 42 (fixed)
+                """)
+            with col2:
+                if debug.get('garch_params'):
+                    gp = debug['garch_params']
+                    st.markdown(f"""
+                    **GARCH Parameters:**
+                    - ω (omega): {gp.get('omega', 'N/A'):.2e}
+                    - α (alpha): {gp.get('alpha', 'N/A'):.4f}
+                    - β (beta): {gp.get('beta', 'N/A'):.4f}
+                    - μ (drift): {gp.get('mu', 'N/A'):.4f}%
+                    - Long-run vol: {gp.get('long_run_vol', 'N/A'):.2f}%
+                    """)
+            
+            st.markdown("### Simulation Outputs")
+            st.markdown(f"""
+            - Mean Terminal Price: ${debug.get('sim_mean', 'N/A'):,.2f}
+            - 5th Percentile: ${debug.get('sim_p5', 'N/A'):,.2f}
+            - 95th Percentile: ${debug.get('sim_p95', 'N/A'):,.2f}
+            """)
+            
+            # Add copy button for easy comparison
+            debug_str = str(debug)
+            st.code(debug_str, language="python")
+        else:
+            st.info("Run a simulation to see debug info")
+    
     st.caption(f"Last updated: {sim_results.simulation_date} | Execution time: {sim_results.execution_time_seconds:.2f}s")
 
 else:
