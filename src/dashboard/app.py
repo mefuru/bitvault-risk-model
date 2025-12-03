@@ -781,6 +781,72 @@ try:
         else:
             st.sidebar.error("Refresh failed - check logs")
         st.rerun()
+    
+    # Full recalibration button
+    if st.sidebar.button("⚙️ Full Recalibration", use_container_width=True, 
+                         help="Refresh all data AND recalibrate GARCH model"):
+        with st.spinner("🔄 Full recalibration in progress..."):
+            from src.data.prices import PriceFetcher
+            from src.data.macro import MacroFetcher
+            from src.model.garch import GARCHModel
+            from datetime import timedelta
+            
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            start_date = (datetime.now() - timedelta(days=3*365)).strftime('%Y-%m-%d')
+            
+            recal_status = []
+            
+            # 1. Refresh BTC prices (3 years)
+            try:
+                price_fetcher = PriceFetcher(use_cryptoquant=False)
+                df = price_fetcher.fetch_prices(start_date, end_date)
+                price_fetcher.save_to_db(df)
+                recal_status.append(f"✅ Prices: {len(df)} rows")
+            except Exception as e:
+                recal_status.append(f"❌ Prices: {e}")
+            
+            # 2. Refresh macro data
+            try:
+                macro_fetcher = MacroFetcher()
+                df = macro_fetcher.fetch_all(start_date, end_date)
+                if not df.empty:
+                    macro_fetcher.save_to_db(df)
+                    recal_status.append(f"✅ Macro data refreshed")
+            except Exception as e:
+                recal_status.append(f"❌ Macro: {e}")
+            
+            # 3. Refresh CryptoQuant if available
+            try:
+                from src.data.cryptoquant import CryptoQuantFetcher
+                cq = CryptoQuantFetcher()
+                if cq.available:
+                    cq_start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    data = cq.fetch_all(cq_start, end_date)
+                    if data:
+                        cq.save_to_db(data)
+                        recal_status.append(f"✅ CryptoQuant refreshed")
+            except Exception as e:
+                recal_status.append(f"⚠️ CryptoQuant: {e}")
+            
+            # 4. Recalibrate GARCH
+            try:
+                garch = GARCHModel()
+                params = garch.fit()
+                garch.save_calibration(params)
+                recal_status.append(f"✅ GARCH: vol={params.long_run_volatility:.1f}%")
+            except Exception as e:
+                recal_status.append(f"❌ GARCH: {e}")
+            
+            # Clear all caches
+            st.cache_data.clear()
+            st.cache_resource.clear()
+        
+        # Show results
+        st.sidebar.markdown("**Recalibration Results:**")
+        for status in recal_status:
+            st.sidebar.write(status)
+        
+        st.rerun()
 
 except Exception as e:
     st.sidebar.error(f"Could not check data status: {e}")
@@ -1226,6 +1292,63 @@ if st.session_state.simulation_results is not None:
             st.code(debug_str, language="python")
         else:
             st.info("Run a simulation to see debug info")
+        
+        # Data fingerprint section
+        st.markdown("### Data Fingerprint")
+        try:
+            db_path = get_db_path()
+            conn = sqlite3.connect(db_path)
+            
+            # Get price data stats
+            price_stats = conn.execute("""
+                SELECT COUNT(*) as cnt, 
+                       MIN(date) as min_date, 
+                       MAX(date) as max_date,
+                       AVG(close) as avg_price
+                FROM btc_prices
+            """).fetchone()
+            
+            # Get GARCH calibration
+            garch_cal = conn.execute("""
+                SELECT calibration_date, omega, alpha, beta, mu, long_run_volatility
+                FROM garch_calibrations
+                ORDER BY calibration_date DESC
+                LIMIT 1
+            """).fetchone()
+            
+            conn.close()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"""
+                **Price Data:**
+                - Rows: {price_stats[0]}
+                - Date Range: {price_stats[1]} to {price_stats[2]}
+                - Avg Price: ${price_stats[3]:,.0f}
+                """)
+            with col2:
+                if garch_cal:
+                    st.markdown(f"""
+                    **GARCH Calibration:**
+                    - Date: {garch_cal[0]}
+                    - ω: {garch_cal[1]:.2e}
+                    - α: {garch_cal[2]:.4f}
+                    - β: {garch_cal[3]:.4f}
+                    - μ: {garch_cal[4]:.4f}%
+                    - Vol: {garch_cal[5]:.2f}%
+                    """)
+                else:
+                    st.warning("No GARCH calibration found")
+                    
+            # Create a simple fingerprint for comparison
+            fingerprint = f"{price_stats[0]}|{price_stats[2]}|{price_stats[3]:.0f}"
+            if garch_cal:
+                fingerprint += f"|{garch_cal[2]:.4f}|{garch_cal[3]:.4f}"
+            st.code(f"Fingerprint: {fingerprint}", language="text")
+            st.caption("Compare this fingerprint between local and Streamlit to verify data consistency")
+            
+        except Exception as e:
+            st.error(f"Could not get data fingerprint: {e}")
     
     st.caption(f"Last updated: {sim_results.simulation_date} | Execution time: {sim_results.execution_time_seconds:.2f}s")
 
