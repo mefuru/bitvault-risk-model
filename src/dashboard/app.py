@@ -7,6 +7,7 @@ Run with: streamlit run src/dashboard/app.py
 import os
 import sys
 import sqlite3
+from datetime import datetime
 
 # Add project root to path for cloud deployment
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -58,14 +59,49 @@ def initialize_cloud_data():
         # Initialize database schema
         init_database()
         
-        # Check if we have sufficient data
+        # Also create CryptoQuant tables if they don't exist
         db_path = get_db_path()
         conn = sqlite3.connect(db_path)
         
+        # Create all required tables
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS exchange_flows (
+                date TEXT PRIMARY KEY,
+                net_flow REAL,
+                inflow REAL,
+                outflow REAL,
+                source TEXT,
+                fetched_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS funding_rates (
+                date TEXT PRIMARY KEY,
+                funding_rate REAL,
+                source TEXT,
+                fetched_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS onchain_metrics (
+                date TEXT,
+                metric TEXT,
+                value REAL,
+                source TEXT,
+                fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (date, metric)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_onchain_metric ON onchain_metrics(metric)")
+        
+        conn.commit()
+        
+        # Check if we have sufficient data
         try:
             count = conn.execute("SELECT COUNT(*) FROM btc_prices").fetchone()[0]
         except sqlite3.OperationalError:
-            # Table doesn't exist yet
             count = 0
         finally:
             conn.close()
@@ -75,8 +111,7 @@ def initialize_cloud_data():
             logger.info(f"Database has {count} rows, backfilling data...")
             
             # Show a message to the user
-            with st.spinner("Initializing data (first run only, ~30 seconds)..."):
-                # Backfill 3 years of price data
+            with st.spinner("🔄 Initializing data (first run only, ~60 seconds)..."):
                 from src.data.prices import PriceFetcher
                 from src.data.macro import MacroFetcher
                 from datetime import datetime, timedelta
@@ -93,7 +128,7 @@ def initialize_cloud_data():
                 except Exception as e:
                     logger.error(f"Failed to backfill prices: {e}")
                 
-                # Fetch macro data
+                # Fetch macro data (VIX, etc.)
                 try:
                     macro_fetcher = MacroFetcher()
                     df = macro_fetcher.fetch_all(start_date, end_date)
@@ -102,6 +137,24 @@ def initialize_cloud_data():
                         logger.info(f"Backfilled macro data")
                 except Exception as e:
                     logger.error(f"Failed to backfill macro: {e}")
+                
+                # Fetch CryptoQuant data if API key is available
+                try:
+                    from src.data.cryptoquant import CryptoQuantFetcher
+                    cq_fetcher = CryptoQuantFetcher()
+                    if cq_fetcher.available:
+                        # Fetch 1 year of on-chain data
+                        cq_start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                        data = cq_fetcher.fetch_all(cq_start, end_date)
+                        if data:
+                            counts = cq_fetcher.save_to_db(data)
+                            logger.info(f"Backfilled CryptoQuant data: {counts}")
+                    else:
+                        logger.warning("CryptoQuant API key not configured, skipping on-chain data")
+                except ImportError:
+                    logger.warning("CryptoQuant module not available")
+                except Exception as e:
+                    logger.error(f"Failed to backfill CryptoQuant: {e}")
             
             return "initialized"
         else:
@@ -177,8 +230,24 @@ def get_garch_params():
 @st.cache_data(ttl=1800)
 def get_regime_classification():
     """Get current regime classification (cached for 30 min)."""
-    classifier = RegimeClassifier(use_onchain=True)  # Enable on-chain indicators
-    return classifier.classify()
+    # Try with on-chain support, fall back to basic if not available
+    try:
+        classifier = RegimeClassifier(use_onchain=True)
+        return classifier.classify()
+    except TypeError:
+        # Fallback for older classifier without use_onchain parameter
+        classifier = RegimeClassifier()
+        return classifier.classify()
+    except Exception as e:
+        logger.warning(f"Regime classification failed: {e}")
+        # Return a default classification if everything fails
+        return RegimeClassification(
+            regime="normal",
+            indicators=[],
+            stress_count=0,
+            total_indicators=0,
+            classification_date=datetime.now().strftime("%Y-%m-%d")
+        )
 
 
 def run_analysis(btc_collateral: float, loan_amount: float, accrued_interest: float, regime: str):
@@ -375,70 +444,87 @@ def create_regime_history_chart(days: int = 90) -> go.Figure:
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     
+    # Helper function to safely query tables (handles missing tables)
+    def safe_query(query: str) -> pd.DataFrame:
+        try:
+            return pd.read_sql_query(query, conn)
+        except Exception as e:
+            logger.debug(f"Query failed (table may not exist): {e}")
+            return pd.DataFrame()
+    
     # Load BTC prices
-    btc_df = pd.read_sql_query(
+    btc_df = safe_query(
         f"""SELECT date, close FROM btc_prices 
-            ORDER BY date DESC LIMIT {days}""",
-        conn
+            ORDER BY date DESC LIMIT {days}"""
     )
     if not btc_df.empty:
         btc_df['date'] = pd.to_datetime(btc_df['date'])
         btc_df = btc_df.set_index('date').sort_index()
     
     # Load VIX
-    vix_df = pd.read_sql_query(
+    vix_df = safe_query(
         f"""SELECT date, value as vix FROM macro_data 
             WHERE indicator = 'vix' 
-            ORDER BY date DESC LIMIT {days}""",
-        conn
+            ORDER BY date DESC LIMIT {days}"""
     )
     if not vix_df.empty:
         vix_df['date'] = pd.to_datetime(vix_df['date'])
         vix_df = vix_df.set_index('date').sort_index()
     
     # Load funding rates
-    funding_df = pd.read_sql_query(
+    funding_df = safe_query(
         f"""SELECT date, funding_rate FROM funding_rates 
-            ORDER BY date DESC LIMIT {days}""",
-        conn
+            ORDER BY date DESC LIMIT {days}"""
     )
     if not funding_df.empty:
         funding_df['date'] = pd.to_datetime(funding_df['date'])
         funding_df = funding_df.set_index('date').sort_index()
     
     # Load SOPR
-    sopr_df = pd.read_sql_query(
+    sopr_df = safe_query(
         f"""SELECT date, value as sopr FROM onchain_metrics 
             WHERE metric = 'sopr' 
-            ORDER BY date DESC LIMIT {days}""",
-        conn
+            ORDER BY date DESC LIMIT {days}"""
     )
     if not sopr_df.empty:
         sopr_df['date'] = pd.to_datetime(sopr_df['date'])
         sopr_df = sopr_df.set_index('date').sort_index()
     
     # Load Exchange Netflow
-    netflow_df = pd.read_sql_query(
+    netflow_df = safe_query(
         f"""SELECT date, net_flow FROM exchange_flows 
-            ORDER BY date DESC LIMIT {days}""",
-        conn
+            ORDER BY date DESC LIMIT {days}"""
     )
     if not netflow_df.empty:
         netflow_df['date'] = pd.to_datetime(netflow_df['date'])
         netflow_df = netflow_df.set_index('date').sort_index()
     
     # Load MVRV
-    mvrv_df = pd.read_sql_query(
+    mvrv_df = safe_query(
         f"""SELECT date, value as mvrv FROM onchain_metrics 
             WHERE metric = 'mvrv' 
-            ORDER BY date DESC LIMIT {days}""",
-        conn
+            ORDER BY date DESC LIMIT {days}"""
     )
     if not mvrv_df.empty:
         mvrv_df['date'] = pd.to_datetime(mvrv_df['date'])
         mvrv_df = mvrv_df.set_index('date').sort_index()
     
     conn.close()
+    
+    # If we don't have BTC prices, we can't show the chart
+    if btc_df.empty:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No price data available. Run data refresh to populate.",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16)
+        )
+        fig.update_layout(
+            title="Historical Regime Indicators",
+            height=300
+        )
+        return fig
     
     # Count how many subplots we need
     num_plots = 1  # BTC price always
@@ -1006,6 +1092,19 @@ if st.session_state.simulation_results is not None:
     try:
         fig_regime = create_regime_history_chart(days=history_days)
         st.plotly_chart(fig_regime, use_container_width=True)
+        
+        # Check if CryptoQuant data is available
+        db_path = get_db_path()
+        conn = sqlite3.connect(db_path)
+        try:
+            onchain_count = conn.execute("SELECT COUNT(*) FROM onchain_metrics").fetchone()[0]
+        except:
+            onchain_count = 0
+        conn.close()
+        
+        if onchain_count == 0:
+            st.info("💡 **On-chain indicators not shown.** Add your CryptoQuant API key to Streamlit secrets to enable exchange netflow, funding rates, SOPR, and MVRV charts.")
+            
     except Exception as e:
         st.warning(f"Could not load regime history: {e}")
         logger.error(f"Regime history chart failed: {e}")
