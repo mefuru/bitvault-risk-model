@@ -1,11 +1,19 @@
 """
-Regime classification using freely available data.
+Regime classification using market and on-chain data.
 
 Classifies market as NORMAL or STRESS based on:
+
+Market Indicators:
 - VIX level
 - BTC realized volatility
 - BTC drawdown from recent high
 - BTC-S&P 500 correlation
+
+On-Chain Indicators (CryptoQuant):
+- Exchange netflow (selling pressure)
+- Funding rates (market sentiment)
+- SOPR (realized profit/loss)
+- MVRV (market vs realized value)
 """
 
 import sqlite3
@@ -19,6 +27,9 @@ import pandas as pd
 from src.data.database import get_db_path
 from src.data.prices import PriceFetcher
 from src.data.macro import MacroFetcher
+from src.logging_config import get_logger
+
+logger = get_logger("regime")
 
 
 @dataclass
@@ -89,16 +100,31 @@ class RegimeClassifier:
     
     # Thresholds for stress signals
     THRESHOLDS = {
+        # Market indicators
         "vix": 30.0,                    # VIX above 30 = fear
         "btc_volatility_multiple": 1.5,  # Current vol > 1.5x average = elevated
         "btc_drawdown": -0.15,          # Down 15% from 30-day high
         "correlation_stress": 0.7,       # High BTC-SPX correlation during down move
+        
+        # On-chain indicators (CryptoQuant)
+        "netflow_stress": 10000,         # >10k BTC flowing to exchanges = selling pressure
+        "funding_rate_stress": -0.01,    # Negative funding = bearish sentiment
+        "sopr_stress": 0.98,             # SOPR < 0.98 = selling at loss (capitulation)
+        "mvrv_low": 1.0,                 # MVRV < 1 = historically oversold
+        "mvrv_high": 3.5,                # MVRV > 3.5 = historically overbought
     }
     
-    def __init__(self):
+    def __init__(self, use_onchain: bool = True):
+        """
+        Initialize classifier.
+        
+        Args:
+            use_onchain: Whether to use CryptoQuant on-chain indicators
+        """
         self.db_path = get_db_path()
         self.price_fetcher = PriceFetcher(use_cryptoquant=False)
         self.macro_fetcher = MacroFetcher()
+        self.use_onchain = use_onchain
     
     def _load_btc_prices(self, days: int = 90) -> pd.DataFrame:
         """Load recent BTC prices."""
@@ -255,6 +281,183 @@ class RegimeClassifier:
             description=f"Correlation {correlation:.2f}, SPX {'down' if spx_down else 'up/flat'} {spx_return_total*100:.1f}%"
         )
     
+    # =========================================================================
+    # ON-CHAIN INDICATORS (CryptoQuant)
+    # =========================================================================
+    
+    def _load_onchain_metric(self, metric: str, days: int = 7) -> pd.Series:
+        """Load on-chain metric from database."""
+        conn = sqlite3.connect(self.db_path)
+        
+        try:
+            df = pd.read_sql_query(
+                """
+                SELECT date, value FROM onchain_metrics 
+                WHERE metric = ? 
+                ORDER BY date DESC 
+                LIMIT ?
+                """,
+                conn,
+                params=(metric, days)
+            )
+            
+            if df.empty:
+                return pd.Series(dtype=float)
+            
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.set_index('date').sort_index()
+            return df['value']
+            
+        except Exception as e:
+            logger.warning(f"Error loading {metric}: {e}")
+            return pd.Series(dtype=float)
+        finally:
+            conn.close()
+    
+    def _load_exchange_netflow(self, days: int = 7) -> pd.Series:
+        """Load exchange netflow from database."""
+        conn = sqlite3.connect(self.db_path)
+        
+        try:
+            df = pd.read_sql_query(
+                """
+                SELECT date, net_flow FROM exchange_flows 
+                ORDER BY date DESC 
+                LIMIT ?
+                """,
+                conn,
+                params=(days,)
+            )
+            
+            if df.empty:
+                return pd.Series(dtype=float)
+            
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.set_index('date').sort_index()
+            return df['net_flow']
+            
+        except Exception as e:
+            logger.warning(f"Error loading netflow: {e}")
+            return pd.Series(dtype=float)
+        finally:
+            conn.close()
+    
+    def _load_funding_rates(self, days: int = 7) -> pd.Series:
+        """Load funding rates from database."""
+        conn = sqlite3.connect(self.db_path)
+        
+        try:
+            df = pd.read_sql_query(
+                """
+                SELECT date, funding_rate FROM funding_rates 
+                ORDER BY date DESC 
+                LIMIT ?
+                """,
+                conn,
+                params=(days,)
+            )
+            
+            if df.empty:
+                return pd.Series(dtype=float)
+            
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.set_index('date').sort_index()
+            return df['funding_rate']
+            
+        except Exception as e:
+            logger.warning(f"Error loading funding rates: {e}")
+            return pd.Series(dtype=float)
+        finally:
+            conn.close()
+    
+    def _calculate_netflow_indicator(self) -> Optional[RegimeIndicator]:
+        """Check exchange netflow (high inflow = selling pressure)."""
+        netflow = self._load_exchange_netflow(days=7)
+        
+        if netflow.empty:
+            return None
+        
+        # Use 7-day average
+        avg_netflow = netflow.mean()
+        
+        is_stress = avg_netflow > self.THRESHOLDS["netflow_stress"]
+        
+        return RegimeIndicator(
+            name="Exchange Netflow",
+            value=avg_netflow,
+            threshold=self.THRESHOLDS["netflow_stress"],
+            is_stress=is_stress,
+            description=f"7d avg netflow: {avg_netflow:,.0f} BTC ({'inflow' if avg_netflow > 0 else 'outflow'})"
+        )
+    
+    def _calculate_funding_indicator(self) -> Optional[RegimeIndicator]:
+        """Check funding rates (negative = bearish sentiment)."""
+        funding = self._load_funding_rates(days=7)
+        
+        if funding.empty:
+            return None
+        
+        # Use latest funding rate
+        current_funding = funding.iloc[-1]
+        
+        is_stress = current_funding < self.THRESHOLDS["funding_rate_stress"]
+        
+        return RegimeIndicator(
+            name="Funding Rate",
+            value=current_funding,
+            threshold=self.THRESHOLDS["funding_rate_stress"],
+            is_stress=is_stress,
+            description=f"Funding: {current_funding*100:.3f}% ({'bearish' if current_funding < 0 else 'bullish'})"
+        )
+    
+    def _calculate_sopr_indicator(self) -> Optional[RegimeIndicator]:
+        """Check SOPR (< 1 = selling at loss = capitulation)."""
+        sopr = self._load_onchain_metric('sopr', days=7)
+        
+        if sopr.empty:
+            return None
+        
+        # Use 7-day average
+        avg_sopr = sopr.mean()
+        
+        is_stress = avg_sopr < self.THRESHOLDS["sopr_stress"]
+        
+        return RegimeIndicator(
+            name="SOPR",
+            value=avg_sopr,
+            threshold=self.THRESHOLDS["sopr_stress"],
+            is_stress=is_stress,
+            description=f"SOPR: {avg_sopr:.3f} ({'loss' if avg_sopr < 1 else 'profit'})"
+        )
+    
+    def _calculate_mvrv_indicator(self) -> Optional[RegimeIndicator]:
+        """Check MVRV (extremes indicate overbought/oversold)."""
+        mvrv = self._load_onchain_metric('mvrv', days=7)
+        
+        if mvrv.empty:
+            return None
+        
+        current_mvrv = mvrv.iloc[-1]
+        
+        # Stress if extremely overbought OR oversold
+        is_stress = (current_mvrv > self.THRESHOLDS["mvrv_high"] or 
+                    current_mvrv < self.THRESHOLDS["mvrv_low"])
+        
+        if current_mvrv > self.THRESHOLDS["mvrv_high"]:
+            status = "overbought"
+        elif current_mvrv < self.THRESHOLDS["mvrv_low"]:
+            status = "oversold"
+        else:
+            status = "neutral"
+        
+        return RegimeIndicator(
+            name="MVRV",
+            value=current_mvrv,
+            threshold=self.THRESHOLDS["mvrv_high"],  # Show high threshold
+            is_stress=is_stress,
+            description=f"MVRV: {current_mvrv:.2f} ({status})"
+        )
+    
     def classify(self, stress_threshold: int = 2) -> RegimeClassification:
         """
         Classify current market regime.
@@ -265,6 +468,7 @@ class RegimeClassifier:
         Returns:
             RegimeClassification with all indicator details
         """
+        # Market indicators (always available)
         indicators = [
             self._calculate_vix_indicator(),
             self._calculate_volatility_indicator(),
@@ -272,10 +476,26 @@ class RegimeClassifier:
             self._calculate_correlation_indicator(),
         ]
         
+        # On-chain indicators (if enabled and available)
+        if self.use_onchain:
+            onchain_indicators = [
+                self._calculate_netflow_indicator(),
+                self._calculate_funding_indicator(),
+                self._calculate_sopr_indicator(),
+                self._calculate_mvrv_indicator(),
+            ]
+            
+            # Only add indicators that have data
+            for ind in onchain_indicators:
+                if ind is not None:
+                    indicators.append(ind)
+        
         stress_count = sum(1 for ind in indicators if ind.is_stress)
         
         # STRESS if enough indicators trigger
         regime = "stress" if stress_count >= stress_threshold else "normal"
+        
+        logger.info(f"Regime: {regime} ({stress_count}/{len(indicators)} stress signals)")
         
         return RegimeClassification(
             regime=regime,
@@ -290,9 +510,9 @@ class RegimeClassifier:
         return self.classify().regime
 
 
-def classify_regime() -> RegimeClassification:
+def classify_regime(use_onchain: bool = True) -> RegimeClassification:
     """Convenience function to classify current regime."""
-    classifier = RegimeClassifier()
+    classifier = RegimeClassifier(use_onchain=use_onchain)
     return classifier.classify()
 
 

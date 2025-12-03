@@ -177,7 +177,7 @@ def get_garch_params():
 @st.cache_data(ttl=1800)
 def get_regime_classification():
     """Get current regime classification (cached for 30 min)."""
-    classifier = RegimeClassifier()
+    classifier = RegimeClassifier(use_onchain=True)  # Enable on-chain indicators
     return classifier.classify()
 
 
@@ -362,6 +362,233 @@ def create_distribution_chart(
     return fig
 
 
+def create_regime_history_chart(days: int = 90) -> go.Figure:
+    """
+    Create historical chart showing regime indicators over time.
+    Shows BTC price with regime indicator overlays.
+    
+    Args:
+        days: Number of days of history to show
+    """
+    from src.data.database import get_db_path
+    
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path)
+    
+    # Load BTC prices
+    btc_df = pd.read_sql_query(
+        f"""SELECT date, close FROM btc_prices 
+            ORDER BY date DESC LIMIT {days}""",
+        conn
+    )
+    if not btc_df.empty:
+        btc_df['date'] = pd.to_datetime(btc_df['date'])
+        btc_df = btc_df.set_index('date').sort_index()
+    
+    # Load VIX
+    vix_df = pd.read_sql_query(
+        f"""SELECT date, value as vix FROM macro_data 
+            WHERE indicator = 'vix' 
+            ORDER BY date DESC LIMIT {days}""",
+        conn
+    )
+    if not vix_df.empty:
+        vix_df['date'] = pd.to_datetime(vix_df['date'])
+        vix_df = vix_df.set_index('date').sort_index()
+    
+    # Load funding rates
+    funding_df = pd.read_sql_query(
+        f"""SELECT date, funding_rate FROM funding_rates 
+            ORDER BY date DESC LIMIT {days}""",
+        conn
+    )
+    if not funding_df.empty:
+        funding_df['date'] = pd.to_datetime(funding_df['date'])
+        funding_df = funding_df.set_index('date').sort_index()
+    
+    # Load SOPR
+    sopr_df = pd.read_sql_query(
+        f"""SELECT date, value as sopr FROM onchain_metrics 
+            WHERE metric = 'sopr' 
+            ORDER BY date DESC LIMIT {days}""",
+        conn
+    )
+    if not sopr_df.empty:
+        sopr_df['date'] = pd.to_datetime(sopr_df['date'])
+        sopr_df = sopr_df.set_index('date').sort_index()
+    
+    # Load Exchange Netflow
+    netflow_df = pd.read_sql_query(
+        f"""SELECT date, net_flow FROM exchange_flows 
+            ORDER BY date DESC LIMIT {days}""",
+        conn
+    )
+    if not netflow_df.empty:
+        netflow_df['date'] = pd.to_datetime(netflow_df['date'])
+        netflow_df = netflow_df.set_index('date').sort_index()
+    
+    # Load MVRV
+    mvrv_df = pd.read_sql_query(
+        f"""SELECT date, value as mvrv FROM onchain_metrics 
+            WHERE metric = 'mvrv' 
+            ORDER BY date DESC LIMIT {days}""",
+        conn
+    )
+    if not mvrv_df.empty:
+        mvrv_df['date'] = pd.to_datetime(mvrv_df['date'])
+        mvrv_df = mvrv_df.set_index('date').sort_index()
+    
+    conn.close()
+    
+    # Count how many subplots we need
+    num_plots = 1  # BTC price always
+    if not vix_df.empty: num_plots += 1
+    if not funding_df.empty: num_plots += 1
+    if not sopr_df.empty: num_plots += 1
+    if not netflow_df.empty: num_plots += 1
+    if not mvrv_df.empty: num_plots += 1
+    
+    # Build subplot titles
+    titles = ["BTC Price"]
+    if not vix_df.empty: titles.append("VIX (Stress > 30)")
+    if not funding_df.empty: titles.append("Funding Rate % (Stress < -0.01)")
+    if not sopr_df.empty: titles.append("SOPR (Stress < 0.98)")
+    if not netflow_df.empty: titles.append("Exchange Netflow BTC (Stress > 10k)")
+    if not mvrv_df.empty: titles.append("MVRV (Stress < 1 or > 3.5)")
+    
+    # Calculate row heights - give more space to BTC price
+    heights = [0.3] + [0.7 / (num_plots - 1)] * (num_plots - 1) if num_plots > 1 else [1.0]
+    
+    fig = make_subplots(
+        rows=num_plots, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.04,
+        row_heights=heights,
+        subplot_titles=titles
+    )
+    
+    current_row = 1
+    
+    # 1. BTC Price (always show)
+    if not btc_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=btc_df.index,
+                y=btc_df['close'],
+                name='BTC Price',
+                line=dict(color='#F7931A', width=1.5),
+                hovertemplate='%{x}<br>$%{y:,.0f}<extra></extra>'
+            ),
+            row=current_row, col=1
+        )
+        fig.update_yaxes(title_text="Price ($)", row=current_row, col=1)
+    current_row += 1
+    
+    # 2. VIX
+    if not vix_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=vix_df.index,
+                y=vix_df['vix'],
+                name='VIX',
+                line=dict(color='purple', width=1),
+                hovertemplate='%{x}<br>VIX: %{y:.1f}<extra></extra>'
+            ),
+            row=current_row, col=1
+        )
+        fig.add_hline(y=30, line_dash="dash", line_color="red", 
+                     annotation_text="Stress threshold", row=current_row, col=1)
+        fig.update_yaxes(title_text="VIX", row=current_row, col=1)
+        current_row += 1
+    
+    # 3. Funding Rate
+    if not funding_df.empty:
+        colors = ['#00CC00' if x >= 0 else '#CC0000' for x in funding_df['funding_rate']]
+        fig.add_trace(
+            go.Bar(
+                x=funding_df.index,
+                y=funding_df['funding_rate'] * 100,
+                name='Funding Rate',
+                marker_color=colors,
+                hovertemplate='%{x}<br>%{y:.3f}%<extra></extra>'
+            ),
+            row=current_row, col=1
+        )
+        fig.add_hline(y=-0.01, line_dash="dash", line_color="red", row=current_row, col=1)
+        fig.add_hline(y=0, line_dash="solid", line_color="gray", row=current_row, col=1)
+        fig.update_yaxes(title_text="Rate %", row=current_row, col=1)
+        current_row += 1
+    
+    # 4. SOPR
+    if not sopr_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=sopr_df.index,
+                y=sopr_df['sopr'],
+                name='SOPR',
+                line=dict(color='#0066CC', width=1),
+                fill='tozeroy',
+                fillcolor='rgba(0, 102, 204, 0.1)',
+                hovertemplate='%{x}<br>SOPR: %{y:.3f}<extra></extra>'
+            ),
+            row=current_row, col=1
+        )
+        fig.add_hline(y=1.0, line_dash="solid", line_color="gray", 
+                     annotation_text="Break-even", row=current_row, col=1)
+        fig.add_hline(y=0.98, line_dash="dash", line_color="red",
+                     annotation_text="Stress", row=current_row, col=1)
+        fig.update_yaxes(title_text="SOPR", row=current_row, col=1)
+        current_row += 1
+    
+    # 5. Exchange Netflow
+    if not netflow_df.empty:
+        colors = ['#CC0000' if x > 0 else '#00CC00' for x in netflow_df['net_flow']]
+        fig.add_trace(
+            go.Bar(
+                x=netflow_df.index,
+                y=netflow_df['net_flow'],
+                name='Netflow',
+                marker_color=colors,
+                hovertemplate='%{x}<br>%{y:,.0f} BTC<extra></extra>'
+            ),
+            row=current_row, col=1
+        )
+        fig.add_hline(y=10000, line_dash="dash", line_color="red", row=current_row, col=1)
+        fig.add_hline(y=0, line_dash="solid", line_color="gray", row=current_row, col=1)
+        fig.update_yaxes(title_text="BTC", row=current_row, col=1)
+        current_row += 1
+    
+    # 6. MVRV
+    if not mvrv_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=mvrv_df.index,
+                y=mvrv_df['mvrv'],
+                name='MVRV',
+                line=dict(color='#CC6600', width=1),
+                fill='tozeroy',
+                fillcolor='rgba(204, 102, 0, 0.1)',
+                hovertemplate='%{x}<br>MVRV: %{y:.2f}<extra></extra>'
+            ),
+            row=current_row, col=1
+        )
+        fig.add_hline(y=1.0, line_dash="dash", line_color="red",
+                     annotation_text="Oversold", row=current_row, col=1)
+        fig.add_hline(y=3.5, line_dash="dash", line_color="red",
+                     annotation_text="Overbought", row=current_row, col=1)
+        fig.update_yaxes(title_text="MVRV", row=current_row, col=1)
+    
+    fig.update_layout(
+        height=150 + (num_plots * 120),
+        showlegend=False,
+        title_text="Historical Regime Indicators",
+        title_x=0.5,
+        hovermode='x unified'
+    )
+    
+    return fig
+
+
 def create_probability_chart(sim_results: SimulationResults) -> go.Figure:
     """Create probability of drop bar chart."""
     
@@ -489,10 +716,37 @@ if regime == "auto":
         st.sidebar.info(f"Detected: {regime_icon} {detected_regime.upper()}")
         
         # Show indicator summary in expander
-        with st.sidebar.expander("Regime Indicators"):
+        with st.sidebar.expander("Regime Indicators", expanded=False):
             for ind in auto_classification.indicators:
                 icon = "🔴" if ind.is_stress else "🟢"
                 st.write(f"{icon} **{ind.name}**: {ind.value:.2f}")
+            
+            st.caption(f"Stress signals: {auto_classification.stress_count}/{auto_classification.total_indicators}")
+        
+        # Show indicator reference guide
+        with st.sidebar.expander("📊 Indicator Guide", expanded=False):
+            st.markdown("""
+**Market Indicators:**
+
+| Indicator | Stress When |
+|-----------|-------------|
+| VIX | > 30 |
+| BTC Volatility | > 1.5× average |
+| BTC Drawdown | > 15% from high |
+| BTC-SPX Corr | > 0.7 + SPX down |
+
+**On-Chain (CryptoQuant):**
+
+| Indicator | Stress When |
+|-----------|-------------|
+| Exchange Netflow | > 10k BTC inflow |
+| Funding Rate | < -0.01% |
+| SOPR | < 0.98 |
+| MVRV | < 1.0 or > 3.5 |
+
+*Regime = STRESS if ≥2 indicators trigger*
+            """)
+            
     except Exception as e:
         st.sidebar.warning(f"Could not detect regime: {e}")
         detected_regime = "normal"
@@ -733,6 +987,73 @@ if st.session_state.simulation_results is not None:
         use_container_width=True,
         hide_index=True
     )
+    
+    st.divider()
+    
+    # Row 6: Historical Regime Indicators
+    st.subheader("📊 Historical Regime Indicators")
+    
+    # Time range selector
+    col_hist1, col_hist2 = st.columns([1, 3])
+    with col_hist1:
+        history_days = st.selectbox(
+            "History Period",
+            options=[30, 60, 90, 180, 365, 730, 1095],
+            index=2,  # Default to 90 days
+            format_func=lambda x: f"{x} days" if x < 365 else f"{x//365} year{'s' if x >= 730 else ''}"
+        )
+    
+    try:
+        fig_regime = create_regime_history_chart(days=history_days)
+        st.plotly_chart(fig_regime, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not load regime history: {e}")
+        logger.error(f"Regime history chart failed: {e}")
+    
+    # Indicator explanations in expander
+    with st.expander("📖 Understanding the Indicators", expanded=False):
+        st.markdown("""
+### Market Indicators
+
+**VIX (Volatility Index)** — *The "Fear Gauge"*
+> Measures expected S&P 500 volatility. When VIX > 30, markets are fearful and BTC often correlates with equities in a selloff. High VIX periods include COVID crash (March 2020: VIX hit 82), and banking crisis (March 2023: VIX ~30).
+
+**BTC Volatility** — *Recent Price Swings*  
+> Compares current 7-day volatility to 90-day average. When current vol exceeds 1.5× average, price is moving more than usual — often during crashes or sharp rallies.
+
+**BTC Drawdown** — *Distance from Recent High*
+> How far BTC has fallen from its 30-day high. Drawdowns > 15% suggest meaningful selling pressure. Major drawdowns: -50% in May 2021, -75% in Nov 2022.
+
+**BTC-SPX Correlation** — *Risk Asset Behavior*
+> When BTC moves with stocks during a selloff (correlation > 0.7 while SPX is down), it signals BTC is trading as a risk asset rather than a hedge. Common during macro fear events.
+
+---
+
+### On-Chain Indicators (CryptoQuant)
+
+**Exchange Netflow** — *Selling Pressure Signal*
+> Net BTC flowing into exchanges. **Positive = inflow** (coins moving to exchanges, likely to sell). **Negative = outflow** (coins leaving exchanges, accumulation). Large inflows (>10k BTC) often precede selling. FTX collapse saw massive inflows.
+
+**Funding Rate** — *Derivatives Sentiment*
+> Cost to hold leveraged positions. **Positive** = longs pay shorts (bullish bias). **Negative** = shorts pay longs (bearish bias). Deeply negative funding (-0.01% to -0.1%) signals extreme bearish sentiment, often near bottoms.
+
+**SOPR (Spent Output Profit Ratio)** — *Realized Profit/Loss*
+> Ratio of price sold vs price bought for coins moving on-chain. **SOPR > 1** = selling at profit. **SOPR < 1** = selling at loss (capitulation). SOPR persistently below 1 indicates holders are panic selling at a loss — often a bottom signal.
+
+**MVRV (Market Value to Realized Value)** — *Over/Undervaluation*
+> Compares market cap to realized cap (avg cost basis of all coins). **MVRV > 3.5** = historically overbought (cycle tops). **MVRV < 1** = market trading below aggregate cost basis (cycle bottoms, extreme fear).
+
+---
+
+### Historical Stress Periods
+
+| Period | What Happened | Key Indicators |
+|--------|--------------|----------------|
+| **Mar 2020** | COVID crash, -50% in days | VIX 82, SOPR < 0.9, massive netflow |
+| **May 2021** | China mining ban, -50% | High netflow, negative funding |
+| **Nov 2022** | FTX collapse, -25% | Extreme netflow, SOPR < 0.95 |
+| **Mar 2023** | Banking crisis (SVB) | VIX ~30, correlation spike |
+        """)
     
     # Footer
     st.divider()

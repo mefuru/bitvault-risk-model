@@ -14,6 +14,42 @@ from src.logging_config import get_logger
 logger = get_logger("refresh")
 
 
+def refresh_cryptoquant(days_back: int = 7) -> dict[str, int]:
+    """
+    Refresh CryptoQuant on-chain data.
+    
+    Returns dict with row counts or error messages.
+    """
+    results = {}
+    
+    try:
+        from src.data.cryptoquant import CryptoQuantFetcher
+        
+        fetcher = CryptoQuantFetcher()
+        if not fetcher.available:
+            results['cryptoquant'] = "Not configured"
+            return results
+        
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        
+        data = fetcher.fetch_all(start_date, end_date)
+        if data:
+            counts = fetcher.save_to_db(data)
+            results.update(counts)
+            logger.info(f"CryptoQuant refresh: {counts}")
+        else:
+            results['cryptoquant'] = "No data returned"
+            
+    except ImportError:
+        results['cryptoquant'] = "Module not available"
+    except Exception as e:
+        results['cryptoquant'] = f"Error: {str(e)[:50]}"
+        logger.error(f"CryptoQuant refresh failed: {e}")
+    
+    return results
+
+
 def get_last_update_times() -> dict[str, Optional[str]]:
     """
     Get the last update time for each data source.
@@ -117,6 +153,10 @@ def refresh_all_data(days_back: int = 7) -> dict[str, int]:
     except Exception as e:
         results['macro'] = f"Error: {str(e)[:50]}"
         logger.error(f"Failed to refresh macro data: {e}")
+    
+    # Refresh CryptoQuant on-chain data
+    cryptoquant_results = refresh_cryptoquant(days_back)
+    results.update(cryptoquant_results)
     
     return results
 
